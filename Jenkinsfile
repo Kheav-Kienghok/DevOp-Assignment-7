@@ -17,6 +17,29 @@ pipeline {
             }
         }
 
+        stage("Install AWS CLI v2") {
+            steps {
+                sh '''
+                    set -e
+
+                    if command -v aws >/dev/null 2>&1; then
+                        echo "AWS CLI already installed"
+                        aws --version
+                    else
+                        echo "Installing AWS CLI v2..."
+                        sudo apt-get update -y
+                        sudo apt-get install -y curl unzip
+
+                        curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+                        unzip -o awscliv2.zip
+                        sudo ./aws/install
+
+                        aws --version
+                    fi
+                '''
+            }
+        }
+
         stage("Load AWS Credentials") {
             steps {
                 withCredentials([[
@@ -36,8 +59,8 @@ pipeline {
                 sh """
                     mkdir -p sshkey
                     if [ ! -f sshkey/id_rsa ]; then
-                    ssh-keygen -t rsa -b 4096 -f sshkey/id_rsa -N ""
-                    chmod 600 sshkey/id_rsa
+                        ssh-keygen -t rsa -b 4096 -f sshkey/id_rsa -N ""
+                        chmod 600 sshkey/id_rsa
                     fi
                 """
             }
@@ -69,20 +92,30 @@ pipeline {
             }
         }
 
-        stage("Terraform Destroy (Clean State)") {
+        stage("Terraform Destroy (Only If Resources Exist)") {
             steps {
                 dir("terraform/${TF_ENV}") {
                     withCredentials([[
                         $class: 'AmazonWebServicesCredentialsBinding',
                         credentialsId: 'aws-creds'
                     ]]) {
-                        sh """
+                        sh '''
+                            set +e
                             terraform init
-                            terraform destroy -auto-approve \
-                            -var="aws_region=${AWS_REGION}" \
-                            -var="key_name=${KEY_NAME}" \
-                            -var="public_key=\$(cat ../../sshkey/id_rsa.pub)" || true
-                        """
+
+                            terraform state list > tf_resources.txt 2>/dev/null
+                            STATE_EXIT_CODE=$?
+
+                            if [ $STATE_EXIT_CODE -eq 0 ] && [ -s tf_resources.txt ]; then
+                                echo "Terraform resources found. Running destroy..."
+                                terraform destroy -auto-approve \
+                                    -var="aws_region=${AWS_REGION}" \
+                                    -var="key_name=${KEY_NAME}" \
+                                    -var="public_key=$(cat ../../sshkey/id_rsa.pub)"
+                            else
+                                echo "No existing Terraform resources found. Skipping destroy."
+                            fi
+                        '''
                     }
                 }
             }
@@ -98,9 +131,9 @@ pipeline {
                         sh """
                             terraform init
                             terraform apply -auto-approve \
-                            -var="aws_region=${AWS_REGION}" \
-                            -var="key_name=${KEY_NAME}" \
-                            -var="public_key=\$(cat ../../sshkey/id_rsa.pub)"
+                                -var="aws_region=${AWS_REGION}" \
+                                -var="key_name=${KEY_NAME}" \
+                                -var="public_key=\$(cat ../../sshkey/id_rsa.pub)"
                         """
                     }
                 }
@@ -126,8 +159,8 @@ pipeline {
                 sh """
                     echo "Waiting for EC2 to be ready..."
                     for i in {1..40}; do
-                      ssh -o StrictHostKeyChecking=no -i sshkey/id_rsa ubuntu@${EC2_PUBLIC_IP} "echo READY" && break
-                      sleep 10
+                        ssh -o StrictHostKeyChecking=no -i sshkey/id_rsa ubuntu@${EC2_PUBLIC_IP} "echo READY" && break
+                        sleep 10
                     done
                 """
             }
@@ -147,37 +180,25 @@ pipeline {
                     ssh -o StrictHostKeyChecking=no -i sshkey/id_rsa ubuntu@${EC2_PUBLIC_IP} '
                         set -e
 
-                        echo "Waiting for apt lock to be released..."
+                        echo "Waiting for apt lock..."
                         while sudo fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || \
                             sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || \
                             sudo fuser /var/cache/apt/archives/lock >/dev/null 2>&1; do
-                        sleep 5
+                            sleep 5
                         done
 
-                        sudo apt-get update -y
-                        sudo apt-get install -y ca-certificates curl gnupg
+                        echo "Updating system..."
+                        sudo apt update && sudo apt upgrade -y
 
-                        sudo install -m 0755 -d /etc/apt/keyrings
+                        echo "Installing Docker..."
+                        sudo apt install docker.io -y
 
-                        if [ ! -f /etc/apt/keyrings/docker.asc ]; then
-                        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
-                            sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-                        sudo chmod a+r /etc/apt/keyrings/docker.gpg
-                        fi
-
-                        echo \
-                        "deb [arch=\$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \$(. /etc/os-release && echo \$VERSION_CODENAME) stable" | \
-                        sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-                        sudo apt-get update -y
-                        sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-
-                        sudo systemctl enable docker
+                        echo "Starting Docker..."
                         sudo systemctl start docker
-                        sudo usermod -aG docker ubuntu
+                        sudo systemctl enable docker
 
-                        sudo docker --version
-                        sudo systemctl status docker --no-pager
+                        echo "Adding ubuntu user to docker group..."
+                        sudo usermod -aG docker ubuntu
                     '
                 """
             }
