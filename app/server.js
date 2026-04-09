@@ -9,6 +9,10 @@ app.get("/health", (req, res) => {
   res.json({ status: "healthy", service: "FoodExpress API" });
 });
 
+app.get("/hello", (req, res) => {
+  res.json({ status: "Hello", service: "FoodExpress API" });
+});
+
 app.listen(3000, () => {
   console.log("Server running on port 3000");
 });

@@ -1,40 +1,100 @@
 #!/bin/bash
+set -e
 
-# Update system and install dependencies
-sudo apt update
-sudo apt install fontconfig openjdk-21-jre
+echo "=============================="
+echo " Updating system packages"
+echo "=============================="
+sudo apt update -y
+sudo apt upgrade -y
+
+
+echo "=============================="
+echo " Installing Java (OpenJDK 21)"
+echo "=============================="
+sudo apt install -y fontconfig openjdk-21-jre
 java -version
 
-# Add Jenkins repository and key
+
+echo "=============================="
+echo " Installing Jenkins"
+echo "=============================="
+
+# Create keyrings dir if not exists
+sudo mkdir -p /etc/apt/keyrings
+
+# Add Jenkins key + repo
 sudo wget -O /etc/apt/keyrings/jenkins-keyring.asc \
   https://pkg.jenkins.io/debian-stable/jenkins.io-2026.key
+
 echo "deb [signed-by=/etc/apt/keyrings/jenkins-keyring.asc] https://pkg.jenkins.io/debian-stable binary/" \
   | sudo tee /etc/apt/sources.list.d/jenkins.list > /dev/null
 
-sudo apt update
-sudo apt install jenkins
+# Install Jenkins
+sudo apt update -y
+sudo apt install -y jenkins
 
-# Enable and start Jenkins service
-sudo systemctl enable jenkins
-sudo systemctl start jenkins
-sudo systemctl status jenkins
+# Enable + start Jenkins
+sudo systemctl enable --now jenkins
 
-# System update and Docker installation
-sudo apt update && sudo apt upgrade -y
-sudo apt install docker.io -y
-sudo systemctl status docker
-sudo systemctl start docker
 
-# Add users to Docker group
-sudo usermod -aG docker ubuntu jenkins
+echo "=============================="
+echo " Installing Docker"
+echo "=============================="
+sudo apt install -y docker.io
 
-# Restart Jenkins to apply changes
-sudo systemctl restart jenkins
+# Enable + start Docker
+sudo systemctl enable --now docker
 
-# Install AWS CLI v2
-curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-unzip awscliv2.zip
+
+echo "=============================="
+echo " Configuring Docker permissions"
+echo "=============================="
+sudo usermod -aG docker ubuntu
+sudo usermod -aG docker jenkins
+
+# Allow Jenkins to access Docker socket (⚠️ insecure but common for CI servers)
+sudo chmod 666 /var/run/docker.sock
+
+
+echo "=============================="
+echo " Installing Terraform"
+echo "=============================="
+wget -O - https://apt.releases.hashicorp.com/gpg \
+  | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] \
+https://apt.releases.hashicorp.com $(lsb_release -cs) main" \
+  | sudo tee /etc/apt/sources.list.d/hashicorp.list > /dev/null
+
+sudo apt update -y
+sudo apt install -y terraform
+
+
+echo "=============================="
+echo " Installing AWS CLI v2"
+echo "=============================="
+sudo apt install -y unzip curl
+
+curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
+unzip -q awscliv2.zip
 sudo ./aws/install
 
-# Show initial Jenkins admin password
+# Cleanup
+rm -rf aws awscliv2.zip
+
+
+echo "=============================="
+echo " Restarting Jenkins"
+echo "=============================="
+sudo systemctl restart jenkins
+
+
+echo "=============================="
+echo " Jenkins Admin Password"
+echo "=============================="
 sudo cat /var/lib/jenkins/secrets/initialAdminPassword
+
+echo ""
+echo "=============================="
+echo " Done ✅ Jenkins is ready"
+echo "=============================="
