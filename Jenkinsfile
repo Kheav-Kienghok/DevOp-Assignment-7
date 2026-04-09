@@ -79,9 +79,9 @@ pipeline {
                         sh """
                             terraform init
                             terraform apply -auto-approve \
-                              -var="aws_region=${AWS_REGION}" \
-                              -var="key_name=${KEY_NAME}" \
-                              -var="public_key=$(cat ../../sshkey/id_rsa.pub)"
+                            -var="aws_region=${AWS_REGION}" \
+                            -var="key_name=${KEY_NAME}" \
+                            -var="public_key=\$(cat ../../sshkey/id_rsa.pub)"
                         """
                     }
                 }
