@@ -13,6 +13,10 @@ app.get("/hello", (req, res) => {
   res.json({ status: "Hello", service: "FoodExpress API" });
 });
 
+app.get("/hi", (req, res) => {
+  res.json({ status: "Hi", service: "FoodExpress API" });
+});
+
 app.listen(3000, () => {
   console.log("Server running on port 3000");
 });
