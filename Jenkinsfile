@@ -17,29 +17,6 @@ pipeline {
             }
         }
 
-        stage("Install AWS CLI v2") {
-            steps {
-                sh '''
-                    set -e
-
-                    if command -v aws >/dev/null 2>&1; then
-                        echo "AWS CLI already installed"
-                        aws --version
-                    else
-                        echo "Installing AWS CLI v2..."
-                        sudo apt-get update -y
-                        sudo apt-get install -y curl unzip
-
-                        curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-                        unzip -o awscliv2.zip
-                        sudo ./aws/install
-
-                        aws --version
-                    fi
-                '''
-            }
-        }
-
         stage("Load AWS Credentials") {
             steps {
                 withCredentials([[
