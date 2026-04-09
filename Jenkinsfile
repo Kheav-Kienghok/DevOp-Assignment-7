@@ -34,11 +34,11 @@ pipeline {
         stage("Generate SSH Key Pair") {
             steps {
                 sh """
-                    rm -rf sshkey
-                    mkdir sshkey
-
+                    mkdir -p sshkey
+                    if [ ! -f sshkey/id_rsa ]; then
                     ssh-keygen -t rsa -b 4096 -f sshkey/id_rsa -N ""
                     chmod 600 sshkey/id_rsa
+                    fi
                 """
             }
         }
@@ -66,6 +66,25 @@ pipeline {
                     command -v terraform
                     terraform version
                 """
+            }
+        }
+
+        stage("Terraform Destroy (Clean State)") {
+            steps {
+                dir("terraform/${TF_ENV}") {
+                    withCredentials([[
+                        $class: 'AmazonWebServicesCredentialsBinding',
+                        credentialsId: 'aws-creds'
+                    ]]) {
+                        sh """
+                            terraform init
+                            terraform destroy -auto-approve \
+                            -var="aws_region=${AWS_REGION}" \
+                            -var="key_name=${KEY_NAME}" \
+                            -var="public_key=\$(cat ../../sshkey/id_rsa.pub)" || true
+                        """
+                    }
+                }
             }
         }
 
