@@ -158,29 +158,34 @@ pipeline {
                     ssh -o StrictHostKeyChecking=no -i sshkey/id_rsa ubuntu@${EC2_PUBLIC_IP} '
                         set -e
 
-                        echo "Waiting for apt locks..."
-                        while sudo lsof /var/lib/dpkg/lock-frontend >/dev/null 2>&1 \
-                            || sudo lsof /var/lib/dpkg/lock >/dev/null 2>&1 \
-                            || sudo lsof /var/cache/apt/archives/lock >/dev/null 2>&1; do
-                            echo "Another apt process is running, sleeping 5s..."
-                            sleep 5
-                        done
+                        echo "Checking if Docker is already installed..."
+                        if command -v docker >/dev/null 2>&1; then
+                            echo "Docker is already installed:"
+                            docker --version
+                        else
+                            echo "Docker not found. Installing Docker..."
 
-                        echo "Clearing stale locks if any..."
-                        sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/cache/apt/archives/lock || true
-                        sudo dpkg --configure -a || true
+                            # Wait for any active apt processes
+                            while pgrep -x apt >/dev/null || pgrep -x apt-get >/dev/null; do
+                                echo "Another apt process is running, sleeping 5s..."
+                                sleep 5
+                            done
 
-                        echo "Updating system..."
-                        sudo apt update -y && sudo apt upgrade -y
+                            echo "Updating system..."
+                            sudo apt update -y && sudo apt upgrade -y
 
-                        echo "Installing Docker..."
-                        sudo apt install -y docker.io
+                            echo "Installing Docker..."
+                            sudo apt install -y docker.io
 
-                        echo "Starting Docker..."
-                        sudo systemctl enable --now docker
+                            echo "Starting Docker..."
+                            sudo systemctl enable --now docker
 
-                        echo "Adding ubuntu user to docker group..."
-                        sudo usermod -aG docker ubuntu
+                            echo "Adding ubuntu user to docker group..."
+                            sudo usermod -aG docker ubuntu
+
+                            echo "Docker installation complete:"
+                            docker --version
+                        fi
                     '
                 """
             }
