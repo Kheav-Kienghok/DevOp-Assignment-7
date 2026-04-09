@@ -145,16 +145,39 @@ pipeline {
             steps {
                 sh """
                     ssh -o StrictHostKeyChecking=no -i sshkey/id_rsa ubuntu@${EC2_PUBLIC_IP} '
-                        sudo apt update -y
-                        sudo apt install -y docker.io
+                        set -e
 
-                        sudo systemctl start docker
+                        echo "Waiting for apt lock to be released..."
+                        while sudo fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || \
+                            sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || \
+                            sudo fuser /var/cache/apt/archives/lock >/dev/null 2>&1; do
+                        sleep 5
+                        done
+
+                        sudo apt-get update -y
+                        sudo apt-get install -y ca-certificates curl gnupg
+
+                        sudo install -m 0755 -d /etc/apt/keyrings
+
+                        if [ ! -f /etc/apt/keyrings/docker.asc ]; then
+                        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
+                            sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+                        sudo chmod a+r /etc/apt/keyrings/docker.gpg
+                        fi
+
+                        echo \
+                        "deb [arch=\$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \$(. /etc/os-release && echo \$VERSION_CODENAME) stable" | \
+                        sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+                        sudo apt-get update -y
+                        sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
                         sudo systemctl enable docker
-
+                        sudo systemctl start docker
                         sudo usermod -aG docker ubuntu
 
-                        # Fix permissions immediately (no logout needed)
-                        sudo chmod 666 /var/run/docker.sock
+                        sudo docker --version
+                        sudo systemctl status docker --no-pager
                     '
                 """
             }
