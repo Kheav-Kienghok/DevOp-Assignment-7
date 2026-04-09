@@ -134,16 +134,17 @@ pipeline {
         stage("Wait for EC2 SSH") {
             steps {
                 sh """
-                    echo "Waiting for EC2 to be ready..."
-                    for i in {1..40}; do
+                    echo "Waiting for EC2 SSH..."
+                    for i in {1..60}; do
                         ssh -o StrictHostKeyChecking=no -i sshkey/id_rsa ubuntu@${EC2_PUBLIC_IP} "echo READY" && break
+                        echo "EC2 not ready yet, sleeping 10s..."
                         sleep 10
                     done
                 """
             }
         }
 
-        stage("Copy Docker Image to EC2") {
+        stage("Copy Docker Image") {
             steps {
                 sh """
                     scp -o StrictHostKeyChecking=no -i sshkey/id_rsa ${IMAGE_NAME}.tar ubuntu@${EC2_PUBLIC_IP}:/home/ubuntu/
@@ -151,28 +152,32 @@ pipeline {
             }
         }
 
-        stage("Install Docker on EC2") {
+        stage("Install Docker") {
             steps {
                 sh """
                     ssh -o StrictHostKeyChecking=no -i sshkey/id_rsa ubuntu@${EC2_PUBLIC_IP} '
                         set -e
 
-                        echo "Waiting for apt lock..."
-                        while sudo fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || \
-                            sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || \
-                            sudo fuser /var/cache/apt/archives/lock >/dev/null 2>&1; do
+                        echo "Waiting for apt locks..."
+                        while sudo lsof /var/lib/dpkg/lock-frontend >/dev/null 2>&1 \
+                            || sudo lsof /var/lib/dpkg/lock >/dev/null 2>&1 \
+                            || sudo lsof /var/cache/apt/archives/lock >/dev/null 2>&1; do
+                            echo "Another apt process is running, sleeping 5s..."
                             sleep 5
                         done
 
+                        echo "Clearing stale locks if any..."
+                        sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/cache/apt/archives/lock || true
+                        sudo dpkg --configure -a || true
+
                         echo "Updating system..."
-                        sudo apt update && sudo apt upgrade -y
+                        sudo apt update -y && sudo apt upgrade -y
 
                         echo "Installing Docker..."
-                        sudo apt install docker.io -y
+                        sudo apt install -y docker.io
 
                         echo "Starting Docker..."
-                        sudo systemctl start docker
-                        sudo systemctl enable docker
+                        sudo systemctl enable --now docker
 
                         echo "Adding ubuntu user to docker group..."
                         sudo usermod -aG docker ubuntu
@@ -181,7 +186,7 @@ pipeline {
             }
         }
 
-        stage("Deploy Container on EC2") {
+        stage("Deploy Container") {
             steps {
                 sh """
                     ssh -o StrictHostKeyChecking=no -i sshkey/id_rsa ubuntu@${EC2_PUBLIC_IP} '
