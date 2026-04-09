@@ -122,6 +122,25 @@ pipeline {
             }
         }
 
+        stage("Install Docker on EC2") {
+            steps {
+                sh """
+                    ssh -o StrictHostKeyChecking=no -i sshkey/id_rsa ubuntu@${EC2_PUBLIC_IP} '
+                        sudo apt update -y
+                        sudo apt install -y docker.io
+
+                        sudo systemctl start docker
+                        sudo systemctl enable docker
+
+                        sudo usermod -aG docker ubuntu
+
+                        # Fix permissions immediately (no logout needed)
+                        sudo chmod 666 /var/run/docker.sock
+                    '
+                """
+            }
+        }
+
         stage("Deploy Container on EC2") {
             steps {
                 sh """
