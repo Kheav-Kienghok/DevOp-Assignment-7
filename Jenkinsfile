@@ -158,18 +158,15 @@ pipeline {
                     ssh -o StrictHostKeyChecking=no -i sshkey/id_rsa ubuntu@${EC2_PUBLIC_IP} '
                         set -e
 
+                        echo "Waiting for cloud-init to finish..."
+                        sudo cloud-init status --wait
+
                         echo "Checking if Docker is already installed..."
                         if command -v docker >/dev/null 2>&1; then
                             echo "Docker is already installed:"
                             docker --version
                         else
                             echo "Docker not found. Installing Docker..."
-
-                            # Wait for any active apt processes
-                            while pgrep -x apt >/dev/null || pgrep -x apt-get >/dev/null; do
-                                echo "Another apt process is running, sleeping 5s..."
-                                sleep 5
-                            done
 
                             echo "Updating system..."
                             sudo apt update -y && sudo apt upgrade -y
