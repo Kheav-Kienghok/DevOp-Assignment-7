@@ -4,6 +4,7 @@ pipeline {
     environment {
         AWS_REGION = "us-east-1"
         IMAGE_NAME = "foodexpress-app"
+        IMAGE_TAR  = "foodexpress-app.tar"
         TAG = "${env.BUILD_NUMBER}"
         KEY_NAME = "foodexpress-auto-key"
         TF_ENV = "prod"
@@ -65,9 +66,9 @@ pipeline {
             steps {
                 sh '''
                     set -e
-                    rm -f ${IMAGE_NAME}.tar
-                    docker save -o ${IMAGE_NAME}.tar ${IMAGE_NAME}:${TAG}
-                    ls -lh ${IMAGE_NAME}.tar
+                    rm -f ${IMAGE_TAR}
+                    docker save -o ${IMAGE_TAR} ${IMAGE_NAME}:${TAG}
+                    ls -lh ${IMAGE_TAR}
                 '''
             }
         }
@@ -188,7 +189,7 @@ pipeline {
                     scp -o StrictHostKeyChecking=no \
                         -o UserKnownHostsFile=/dev/null \
                         -i sshkey/id_rsa \
-                        ${IMAGE_NAME}.tar \
+                        ${IMAGE_TAR} \
                         ubuntu@${EC2_PUBLIC_IP}:/home/ubuntu/
                 '''
             }
@@ -196,36 +197,39 @@ pipeline {
 
         stage("Deploy Container on EC2") {
             steps {
-                sh '''
+                sh """
                     set -e
 
                     ssh -o StrictHostKeyChecking=no \
                         -o UserKnownHostsFile=/dev/null \
                         -i sshkey/id_rsa \
-                        ubuntu@${EC2_PUBLIC_IP} '
+                        ubuntu@${EC2_PUBLIC_IP} "
                             set -e
 
-                            echo "Loading Docker image..."
-                            sudo docker load -i /home/ubuntu/${IMAGE_NAME}.tar
+                            echo 'Files in /home/ubuntu:'
+                            ls -lh /home/ubuntu/
 
-                            echo "Stopping old container if exists..."
+                            echo 'Loading Docker image...'
+                            sudo docker load -i /home/ubuntu/${IMAGE_TAR}
+
+                            echo 'Stopping old container if exists...'
                             sudo docker stop foodexpress || true
                             sudo docker rm foodexpress || true
 
-                            echo "Cleaning old unused images..."
+                            echo 'Cleaning old unused images...'
                             sudo docker image prune -f || true
 
-                            echo "Starting new container..."
+                            echo 'Starting new container...'
                             sudo docker run -d \
                                 --name foodexpress \
                                 --restart unless-stopped \
                                 -p 80:3000 \
                                 ${IMAGE_NAME}:${TAG}
 
-                            echo "Running containers:"
+                            echo 'Running containers:'
                             sudo docker ps
-                        '
-                '''
+                        "
+                """
             }
         }
 
@@ -259,7 +263,7 @@ pipeline {
         }
         always {
             sh '''
-                rm -f ${IMAGE_NAME}.tar || true
+                rm -f ${IMAGE_TAR} || true
             '''
         }
     }
