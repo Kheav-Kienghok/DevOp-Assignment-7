@@ -4,9 +4,10 @@ pipeline {
     environment {
         AWS_REGION = "us-east-1"
         IMAGE_NAME = "foodexpress-app"
-        TAG = "latest"
+        TAG = "${env.BUILD_NUMBER}"
         KEY_NAME = "foodexpress-auto-key"
         TF_ENV = "prod"
+        TF_DIR = "terraform/prod"
     }
 
     stages {
@@ -24,6 +25,7 @@ pipeline {
                     credentialsId: 'aws-creds'
                 ]]) {
                     sh '''
+                        set -e
                         echo "AWS credentials loaded successfully"
                         aws sts get-caller-identity
                     '''
@@ -33,85 +35,72 @@ pipeline {
 
         stage("Generate SSH Key Pair") {
             steps {
-                sh """
+                sh '''
+                    set -e
                     mkdir -p sshkey
+
                     if [ ! -f sshkey/id_rsa ]; then
+                        echo "Generating SSH key pair..."
                         ssh-keygen -t rsa -b 4096 -f sshkey/id_rsa -N ""
                         chmod 600 sshkey/id_rsa
+                        chmod 644 sshkey/id_rsa.pub
+                    else
+                        echo "SSH key pair already exists."
                     fi
-                """
+                '''
             }
         }
 
-        stage("Build Docker Image (Jenkins)") {
+        stage("Build Docker Image") {
             steps {
-                sh """
+                sh '''
+                    set -e
                     docker build -t ${IMAGE_NAME}:${TAG} ./app
-                """
+                    docker tag ${IMAGE_NAME}:${TAG} ${IMAGE_NAME}:latest
+                '''
             }
         }
 
         stage("Save Docker Image to TAR") {
             steps {
-                sh """
+                sh '''
+                    set -e
                     rm -f ${IMAGE_NAME}.tar
                     docker save -o ${IMAGE_NAME}.tar ${IMAGE_NAME}:${TAG}
-                """
+                    ls -lh ${IMAGE_NAME}.tar
+                '''
             }
         }
 
         stage("Check Terraform Availability") {
             steps {
-                sh """
+                sh '''
+                    set -e
                     command -v terraform
                     terraform version
-                """
+                '''
             }
         }
 
-        stage("Terraform Destroy (Only If Resources Exist)") {
+        stage("Terraform Apply") {
             steps {
-                dir("terraform/${TF_ENV}") {
+                dir("${TF_DIR}") {
                     withCredentials([[
                         $class: 'AmazonWebServicesCredentialsBinding',
                         credentialsId: 'aws-creds'
                     ]]) {
                         sh '''
-                            set +e
+                            set -e
+
                             terraform init
 
-                            terraform state list > tf_resources.txt 2>/dev/null
-                            STATE_EXIT_CODE=$?
-
-                            if [ $STATE_EXIT_CODE -eq 0 ] && [ -s tf_resources.txt ]; then
-                                echo "Terraform resources found. Running destroy..."
-                                terraform destroy -auto-approve \
-                                    -var="aws_region=${AWS_REGION}" \
-                                    -var="key_name=${KEY_NAME}" \
-                                    -var="public_key=$(cat ../../sshkey/id_rsa.pub)"
-                            else
-                                echo "No existing Terraform resources found. Skipping destroy."
-                            fi
-                        '''
-                    }
-                }
-            }
-        }
-
-        stage("Terraform Apply (Provision EC2)") {
-            steps {
-                dir("terraform/${TF_ENV}") {
-                    withCredentials([[
-                        $class: 'AmazonWebServicesCredentialsBinding',
-                        credentialsId: 'aws-creds'
-                    ]]) {
-                        sh """
-                            terraform init
-                            terraform apply -auto-approve \
+                            terraform plan -out=tfplan \
                                 -var="aws_region=${AWS_REGION}" \
                                 -var="key_name=${KEY_NAME}" \
-                                -var="public_key=\$(cat ../../sshkey/id_rsa.pub)"
-                        """
+                                -var="public_key=$(cat ../../sshkey/id_rsa.pub)"
+
+                            terraform apply -auto-approve tfplan
+                        '''
                     }
                 }
             }
@@ -119,87 +108,144 @@ pipeline {
 
         stage("Get EC2 Public IP") {
             steps {
-                dir("terraform/${TF_ENV}") {
+                dir("${TF_DIR}") {
                     script {
                         env.EC2_PUBLIC_IP = sh(
-                            script: "terraform output -raw public_ip",
+                            script: 'terraform output -raw public_ip',
                             returnStdout: true
                         ).trim()
                     }
                 }
-                echo "EC2 Public IP: ${EC2_PUBLIC_IP}"
+
+                echo "EC2 Public IP: ${env.EC2_PUBLIC_IP}"
             }
         }
 
         stage("Wait for EC2 SSH") {
             steps {
-                sh """
-                    echo "Waiting for EC2 SSH..."
-                    for i in {1..60}; do
-                        ssh -o StrictHostKeyChecking=no -i sshkey/id_rsa ubuntu@${EC2_PUBLIC_IP} "echo READY" && break
+                sh '''
+                    set -e
+                    echo "Waiting for EC2 SSH to become available..."
+
+                    for i in $(seq 1 60); do
+                        if ssh -o StrictHostKeyChecking=no \
+                               -o UserKnownHostsFile=/dev/null \
+                               -o ConnectTimeout=10 \
+                               -i sshkey/id_rsa \
+                               ubuntu@${EC2_PUBLIC_IP} "echo READY" >/dev/null 2>&1; then
+                            echo "EC2 SSH is ready."
+                            exit 0
+                        fi
+
                         echo "EC2 not ready yet, sleeping 10s..."
                         sleep 10
                     done
-                """
+
+                    echo "EC2 SSH did not become ready in time."
+                    exit 1
+                '''
             }
         }
 
-        stage("Copy Docker Image") {
+        stage("Wait for Cloud-Init") {
             steps {
-                sh """
-                    scp -o StrictHostKeyChecking=no -i sshkey/id_rsa ${IMAGE_NAME}.tar ubuntu@${EC2_PUBLIC_IP}:/home/ubuntu/
-                """
+                sh '''
+                    set -e
+                    echo "Waiting for cloud-init to finish on EC2..."
+
+                    ssh -o StrictHostKeyChecking=no \
+                        -o UserKnownHostsFile=/dev/null \
+                        -i sshkey/id_rsa \
+                        ubuntu@${EC2_PUBLIC_IP} \
+                        'sudo cloud-init status --wait'
+
+                    echo "cloud-init completed."
+                '''
             }
         }
 
-        stage("Install Docker") {
+        stage("Verify Docker on EC2") {
             steps {
-                sh """
-                    ssh -o StrictHostKeyChecking=no -i sshkey/id_rsa ubuntu@${EC2_PUBLIC_IP} '
-                        set -e
+                sh '''
+                    set -e
+                    ssh -o StrictHostKeyChecking=no \
+                        -o UserKnownHostsFile=/dev/null \
+                        -i sshkey/id_rsa \
+                        ubuntu@${EC2_PUBLIC_IP} '
+                            set -e
+                            echo "Checking Docker installation..."
+                            docker --version || sudo docker --version
+                            sudo systemctl is-active docker
+                        '
+                '''
+            }
+        }
 
-                        echo "Waiting for cloud-init to finish..."
-                        sudo cloud-init status --wait
+        stage("Copy Docker Image to EC2") {
+            steps {
+                sh '''
+                    set -e
+                    scp -o StrictHostKeyChecking=no \
+                        -o UserKnownHostsFile=/dev/null \
+                        -i sshkey/id_rsa \
+                        ${IMAGE_NAME}.tar \
+                        ubuntu@${EC2_PUBLIC_IP}:/home/ubuntu/
+                '''
+            }
+        }
 
-                        echo "Checking if Docker is already installed..."
-                        if command -v docker >/dev/null 2>&1; then
-                            echo "Docker is already installed:"
-                            docker --version
-                        else
-                            echo "Docker not found. Installing Docker..."
+        stage("Deploy Container on EC2") {
+            steps {
+                sh '''
+                    set -e
 
-                            echo "Updating system..."
-                            sudo apt update -y && sudo apt upgrade -y
+                    ssh -o StrictHostKeyChecking=no \
+                        -o UserKnownHostsFile=/dev/null \
+                        -i sshkey/id_rsa \
+                        ubuntu@${EC2_PUBLIC_IP} '
+                            set -e
 
-                            echo "Installing Docker..."
-                            sudo apt install -y docker.io
+                            echo "Loading Docker image..."
+                            sudo docker load -i /home/ubuntu/${IMAGE_NAME}.tar
 
-                            echo "Starting Docker..."
-                            sudo systemctl enable --now docker
+                            echo "Stopping old container if exists..."
+                            sudo docker stop foodexpress || true
+                            sudo docker rm foodexpress || true
 
-                            echo "Adding ubuntu user to docker group..."
-                            sudo usermod -aG docker ubuntu
+                            echo "Cleaning old unused images..."
+                            sudo docker image prune -f || true
 
-                            echo "Docker installation complete:"
-                            docker --version
+                            echo "Starting new container..."
+                            sudo docker run -d \
+                                --name foodexpress \
+                                --restart unless-stopped \
+                                -p 80:3000 \
+                                ${IMAGE_NAME}:${TAG}
+
+                            echo "Running containers:"
+                            sudo docker ps
+                        '
+                '''
+            }
+        }
+
+        stage("Verify Application") {
+            steps {
+                sh '''
+                    set -e
+                    echo "Checking app response..."
+                    for i in $(seq 1 20); do
+                        if curl -fsS http://${EC2_PUBLIC_IP} >/dev/null 2>&1; then
+                            echo "Application is reachable."
+                            exit 0
                         fi
-                    '
-                """
-            }
-        }
+                        echo "App not ready yet, sleeping 5s..."
+                        sleep 5
+                    done
 
-        stage("Deploy Container") {
-            steps {
-                sh """
-                    ssh -o StrictHostKeyChecking=no -i sshkey/id_rsa ubuntu@${EC2_PUBLIC_IP} '
-                        sudo docker load -i /home/ubuntu/${IMAGE_NAME}.tar
-
-                        sudo docker stop foodexpress || true
-                        sudo docker rm foodexpress || true
-
-                        sudo docker run -d --name foodexpress -p 80:3000 ${IMAGE_NAME}:${TAG}
-                    '
-                """
+                    echo "Application did not become ready in time."
+                    exit 1
+                '''
             }
         }
     }
@@ -209,7 +255,12 @@ pipeline {
             echo "Deployment successful. App is running at http://${EC2_PUBLIC_IP}"
         }
         failure {
-            echo "Deployment failed"
+            echo "Deployment failed."
+        }
+        always {
+            sh '''
+                rm -f ${IMAGE_NAME}.tar || true
+            '''
         }
     }
 }

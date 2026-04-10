@@ -1,12 +1,14 @@
 #!/bin/bash
-set -e
+set -eux
 
-sudo apt update -y
-sudo apt upgrade -y
+export DEBIAN_FRONTEND=noninteractive
 
-sudo apt install -y docker.io
+apt-get update -y
+apt-get install -y docker.io curl
 
-sudo systemctl enable docker
-sudo systemctl start docker
+systemctl enable docker
+systemctl start docker
 
-sudo usermod -aG docker ubuntu
+usermod -aG docker ubuntu
+mkdir -p /home/ubuntu/app
+chown -R ubuntu:ubuntu /home/ubuntu/app

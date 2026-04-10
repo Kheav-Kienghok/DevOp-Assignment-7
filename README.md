@@ -45,8 +45,7 @@ bash main.sh
 ```
 
 ### Notes:
-- Press Enter twice when prompted during installation
-- Jenkins, Docker, and AWS CLI will be installed automatically
+- Jenkins, Docker, Terraform, and AWS CLI will be installed automatically
 
 ---
 
