@@ -1,132 +1,126 @@
 # 🚀 DevOps Assignment 7
 
-This project demonstrates a simple CI/CD pipeline setup using Jenkins, Docker, AWS EC2, and AWS CLI, automated through a setup script.
+This repository demonstrates a simple CI/CD setup using Jenkins, Docker, AWS EC2, AWS CLI, and Terraform. The environment is provisioned and configured with an automated shell script.
 
----
+## Prerequisites
 
-## 📌 Prerequisites
-- AWS Account
-- Basic knowledge of EC2 and SSH
+- AWS account
+- Basic understanding of EC2 and SSH
 - GitHub access
 
----
+## Step 1: Create an EC2 Instance
 
-## ⚙️ Step 1: Create EC2 Instance
-
-1. Go to AWS EC2 Dashboard  
-2. Launch an instance with the following configuration:
-   - Instance Type: t3.medium
-   - OS: Ubuntu
-   - Security Group:
-     - Allow SSH (22)
-     - Allow HTTP (80) *(optional)*
-     - Allow Custom TCP (8080) for Jenkins
-
-3. Connect to your instance using SSH:
+1. Open the AWS EC2 console.
+2. Launch an Ubuntu instance with the following settings:
+   - Instance type: `t3.medium`
+   - Security group inbound rules:
+     - SSH (`22`)
+     - HTTP (`80`) (optional)
+     - Custom TCP (`8080`) for Jenkins
+3. Connect to the instance:
 
 ```bash
 ssh -i your-key.pem ubuntu@<EC2_PUBLIC_IP>
 ```
 
----
+## Step 2: Install Jenkins, Docker, Terraform, and AWS CLI
 
-## 🛠️ Step 2: Install Jenkins, Docker, and AWS CLI
-
-Run the following command:
+Download the setup script:
 
 ```bash
 curl -O https://raw.githubusercontent.com/Kheav-Kienghok/DevOp-Assignment-7/main/main.sh
 ```
 
-Then execute:
+Run the script:
 
 ```bash
 bash main.sh
 ```
 
-### Notes:
-- Jenkins, Docker, Terraform, and AWS CLI will be installed automatically
+The script installs and configures Jenkins, Docker, Terraform, and AWS CLI automatically.
 
----
+## Step 3: Verify Installation
 
-## 🔍 Step 3: Verify Installation
+- Jenkins starts automatically.
+- Docker starts automatically.
+- AWS CLI and Terraform are available after setup.
 
-- Jenkins will start automatically → press `q` to exit logs  
-- Docker will start → press `q` again  
-- AWS CLI will be installed at the end  
+If log output is attached to the terminal, press `q` to return to the shell.
 
----
+## Step 4: Access Jenkins
 
-## 🔐 Step 4: Access Jenkins
+1. Copy the initial Jenkins admin password printed by the script.
+2. Open:
 
-1. Copy the initial admin password shown after installation  
-2. Open your browser and go to:
-
-```
+```bash
 http://<EC2_PUBLIC_IP>:8080
 ```
 
-3. Paste the password to unlock Jenkins  
+3. Paste the password to unlock Jenkins.
 
----
+## Step 5: Install Required Plugin
 
-## 🔌 Step 5: Install Required Plugin
+In Jenkins, go to:
 
-Go to:
-
-Manage Jenkins → Plugins → Available Plugins
+`Manage Jenkins` -> `Plugins` -> `Available plugins`
 
 Install:
+
 - AWS Credentials
 
----
-
-## 🔑 Step 6: Configure AWS Credentials
+## Step 6: Configure AWS Credentials
 
 1. Go to:
 
-Manage Jenkins → Credentials → Global
+`Manage Jenkins` -> `Credentials` -> `Global`
 
-2. Add new credentials:
-   - Kind: AWS Credentials  
-   - ID: aws-creds  
-   - Description: Any description  
-   - Access Key ID: ********  
-   - Secret Access Key: ********  
+2. Add credentials with:
+   - Kind: AWS Credentials
+   - ID: `aws-creds`
+   - Description: any meaningful description
+   - Access Key ID: your key
+   - Secret Access Key: your secret
+3. Save.
 
-3. Save the configuration
+## Step 7: Configure Jenkins Pipeline
 
----
+1. Open Jenkins Dashboard.
+2. Click **New Item**.
+3. Choose **Pipeline**.
+4. Configure the job to use your GitHub repository and `Jenkinsfile`.
 
-## 🔄 Step 7: Setup Jenkins Pipeline
+## Step 8: Run the Pipeline
 
-1. Go to Jenkins Dashboard  
-2. Click New Item  
-3. Select Pipeline  
-4. Configure:
-   - Connect to your GitHub repository
-   - Add your Jenkinsfile
+- Click **Build Now**.
+- Monitor each stage in the build logs.
+- Confirm that all stages complete successfully.
 
----
+## ✅ Expected Result
 
-## ▶️ Step 8: Run the Pipeline
+- Jenkins is running on EC2.
+- Docker is installed and available.
+- AWS CLI is configured.
+- The CI/CD pipeline runs successfully.
 
-- Click Build Now  
-- Monitor the pipeline execution  
-- Ensure all stages complete successfully  
+Example success output:
 
----
+```bash
+[Pipeline] echo
+Deployment successful. App is running at http://<EC2_PUBLIC_IP>
+[Pipeline] }
+[Pipeline] // stage
+[Pipeline] }
+[Pipeline] // withEnv
+[Pipeline] }
+[Pipeline] // withEnv
+[Pipeline] }
+[Pipeline] // node
+[Pipeline] End of Pipeline
+Finished: SUCCESS
+```
 
-## ✅ Final Result
+## Notes
 
-- Jenkins is running on EC2  
-- Docker is installed and ready  
-- AWS CLI is configured  
-- CI/CD pipeline is successfully executed  
-
----
-
-## 📎 Notes
-- Ensure port 8080 is open in your EC2 security group  
-- Keep AWS credentials secure  
-- Stop EC2 instance when not in use to avoid charges  
+- Make sure port `8080` is open in your EC2 security group.
+- Keep AWS credentials secure and never commit them to source control.
+- Stop the EC2 instance when not in use to avoid unnecessary charges.
